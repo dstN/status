@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Status</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f7f9; --card: #fff; --text: #1b1f24; --muted: #626b76; --line: #e2e5ea;
+    --ok: #1f9d55; --down: #d93025; --warn: #c27c0e; --empty: #d5d9df; --accent: #2563eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1216; --card: #171b21; --text: #e6e9ee; --muted: #949ca7; --line: #262c34; --empty: #2c333c; --accent: #6b9bff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.35rem; margin: 0 0 4px; }
+  .muted { color: var(--muted); font-size: .875rem; }
+  form { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-top: 20vh; }
+  label { display: block; font-weight: 600; margin-bottom: 8px; }
+  input[type=password] { width: 100%; font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); }
+  input[type=password]:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .reihe { display: flex; align-items: center; gap: 8px; margin: 12px 0 16px; }
+  button { font: inherit; font-weight: 600; padding: 10px 16px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; cursor: pointer; }
+  button.leise { background: transparent; color: var(--muted); padding: 4px 0; font-weight: 400; text-decoration: underline; }
+  .fehler { color: var(--down); margin: 8px 0 0; min-height: 1.4em; }
+  .gesamt { display: flex; align-items: center; gap: 10px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin: 16px 0; font-weight: 600; }
+  .gesamt.ok { border-left: 4px solid var(--ok); }
+  .gesamt.down { border-left: 4px solid var(--down); }
+  .gesamt.alt { border-left: 4px solid var(--warn); }
+  ul { list-style: none; margin: 0; padding: 0; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+  li { padding: 12px 16px; border-top: 1px solid var(--line); }
+  li:first-child { border-top: 0; }
+  .kopf { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .punkt { width: 10px; height: 10px; border-radius: 50%; flex: none; align-self: center; }
+  .punkt.ok { background: var(--ok); } .punkt.down { background: var(--down); }
+  .host { font-weight: 600; color: inherit; text-decoration: none; word-break: break-all; }
+  .host:hover { text-decoration: underline; }
+  .rechts { margin-left: auto; white-space: nowrap; }
+  .balken { display: flex; gap: 2px; height: 22px; margin: 8px 0 4px; }
+  .balken span { flex: 1; border-radius: 2px; background: var(--empty); }
+  .balken .ok { background: var(--ok); } .balken .down { background: var(--down); } .balken .teil { background: var(--warn); }
+  .fuss { display: flex; justify-content: space-between; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <form id="login" hidden>
+    <h1>Status</h1>
+    <p class="muted">Die Daten sind verschlüsselt. Mit dem Passwort entschlüsselt sie dein Browser.</p>
+    <label for="pw">Passwort</label>
+    <input id="pw" type="password" autocomplete="current-password" required>
+    <div class="reihe">
+      <input id="merken" type="checkbox" checked>
+      <label for="merken" style="margin:0;font-weight:400">Auf diesem Gerät angemeldet bleiben</label>
+    </div>
+    <button type="submit">Anzeigen</button>
+    <p class="fehler" id="fehler" role="alert"></p>
+  </form>
+
+  <section id="ansicht" hidden>
+    <h1>Status</h1>
+    <p class="muted"><span id="stand"></span> · <button class="leise" id="abmelden" type="button">Abmelden</button></p>
+    <div class="gesamt" id="gesamt" role="status"></div>
+    <ul id="liste"></ul>
+    <p class="muted">Balken: die letzten 24 Stunden in halben Stunden. Grün erreichbar, Rot ausgefallen, Gelb teilweise. 401 und 403 zählen als erreichbar.</p>
+  </section>
+</main>
+<script>
+const ITER = 600000, SPEICHER = 'status-schluessel';
+const $ = (id) => document.getElementById(id);
+const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const unten = (code) => code === 0 || code >= 500;
+let key = null, salt = null, timer = null;
+
+async function holen() {
+  const res = await fetch('data.json?t=' + Date.now(), { cache: 'no-store' });
+  if (!res.ok) throw new Error('Keine Daten (' + res.status + ').');
+  return res.json();
+}
+
+async function ableiten(passwort, saltB64) {
+  const roh = await crypto.subtle.importKey('raw', new TextEncoder().encode(passwort), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt: unb64(saltB64), iterations: ITER },
+    roh, { name: 'AES-GCM', length: 256 }, true, ['decrypt']);
+}
+
+async function entschluesseln(env, k) {
+  const klar = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(env.iv) }, k, unb64(env.ct));
+  return JSON.parse(new TextDecoder().decode(klar));
+}
+
+function vor(sek) {
+  const m = Math.round((Date.now() / 1000 - sek) / 60);
+  if (m < 1) return 'gerade eben';
+  if (m < 60) return 'vor ' + m + ' Min.';
+  const h = Math.floor(m / 60);
+  return 'vor ' + h + ' Std.' + (m % 60 ? ' ' + (m % 60) + ' Min.' : '');
+}
+
+function prozent(a, b) { return b ? (Math.floor(a / b * 1000) / 10).toLocaleString('de-DE') + ' %' : '–'; }
+
+function zeigen(data) {
+  const jetzt = Date.now() / 1000;
+  const hosts = Object.keys(data.sites);
+  const reihen = hosts.map((host) => {
+    const s = data.sites[host];
+    const [t, code, ms] = s.recent[s.recent.length - 1];
+    return { host, s, code, ms, down: unten(code) };
+  }).sort((a, b) => (b.down - a.down) || a.host.localeCompare(b.host));
+
+  const anzahlDown = reihen.filter((r) => r.down).length;
+  const alt = jetzt - data.updated > 20 * 60;
+  const g = $('gesamt');
+  g.className = 'gesamt ' + (alt ? 'alt' : anzahlDown ? 'down' : 'ok');
+  g.textContent = alt ? 'Die letzte Prüfung ist ' + vor(data.updated).replace('vor ', '') + ' her, die Prüfung hängt.'
+    : anzahlDown ? anzahlDown + ' von ' + hosts.length + ' Seiten ' + (anzahlDown === 1 ? 'ist' : 'sind') + ' nicht erreichbar.'
+    : 'Alle ' + hosts.length + ' Seiten sind erreichbar.';
+  $('stand').textContent = 'Geprüft ' + vor(data.updated);
+
+  $('liste').replaceChildren(...reihen.map(({ host, s, code, ms, down }) => {
+    const li = document.createElement('li');
+    // 48 Abschnitte à 30 Minuten, der letzte endet jetzt.
+    const segs = [];
+    for (let i = 47; i >= 0; i--) {
+      const bis = jetzt - i * 1800, von = bis - 1800;
+      const teil = s.recent.filter(([t]) => t > von && t <= bis);
+      const schlecht = teil.filter(([, c]) => unten(c)).length;
+      const cls = !teil.length ? '' : !schlecht ? 'ok' : schlecht === teil.length ? 'down' : 'teil';
+      segs.push('<span class="' + cls + '"></span>');
+    }
+    const ok24 = s.recent.filter(([t, c]) => t > jetzt - 86400 && !unten(c)).length;
+    const n24 = s.recent.filter(([t]) => t > jetzt - 86400).length;
+    let okT = 0, nT = 0;
+    for (const [a, b] of Object.values(s.days)) { okT += a; nT += b; }
+    const tage = Object.keys(s.days).length;
+    const seit = s.downSince ? ' seit ' + vor(s.downSince).replace('vor ', '') : '';
+    li.innerHTML =
+      '<div class="kopf"><span class="punkt ' + (down ? 'down' : 'ok') + '" aria-hidden="true"></span>' +
+      '<a class="host" href="https://' + host + '/" rel="noreferrer">' + host + '</a>' +
+      '<span class="rechts muted">' + (down ? (code ? code : 'keine Antwort') + seit : code + ' · ' + ms + ' ms') + '</span></div>' +
+      '<div class="balken" role="img" aria-label="Verfügbarkeit der letzten 24 Stunden: ' + prozent(ok24, n24) + '">' + segs.join('') + '</div>' +
+      '<div class="fuss muted"><span>24 Std.: ' + prozent(ok24, n24) + '</span><span>' + tage + (tage === 1 ? ' Tag: ' : ' Tage: ') + prozent(okT, nT) + '</span></div>';
+    return li;
+  }));
+  $('login').hidden = true;
+  $('ansicht').hidden = false;
+}
+
+async function aktualisieren() {
+  try {
+    const env = await holen();
+    if (env.salt !== salt) { abmelden('Das Passwort wurde geändert. Bitte neu anmelden.'); return; }
+    zeigen(await entschluesseln(env, key));
+  } catch (e) { /* beim nächsten Mal wieder */ }
+}
+
+function abmelden(meldung) {
+  clearInterval(timer);
+  key = salt = null;
+  try { localStorage.removeItem(SPEICHER); } catch {}
+  $('ansicht').hidden = true;
+  $('login').hidden = false;
+  $('fehler').textContent = meldung || '';
+  $('pw').focus();
+}
+
+$('abmelden').addEventListener('click', () => abmelden());
+
+$('login').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const knopf = ev.submitter || $('login').querySelector('button');
+  knopf.disabled = true;
+  $('fehler').textContent = 'Entschlüssele …';
+  try {
+    const env = await holen();
+    const k = await ableiten($('pw').value, env.salt);
+    let data;
+    try { data = await entschluesseln(env, k); } catch { throw new Error('Das Passwort stimmt nicht.'); }
+    key = k; salt = env.salt;
+    if ($('merken').checked) {
+      try { localStorage.setItem(SPEICHER, JSON.stringify({ salt, raw: b64(await crypto.subtle.exportKey('raw', k)) })); } catch {}
+    }
+    $('pw').value = '';
+    $('fehler').textContent = '';
+    zeigen(data);
+    timer = setInterval(aktualisieren, 60000);
+  } catch (e) {
+    $('fehler').textContent = e.message;
+  } finally {
+    knopf.disabled = false;
+  }
+});
+
+(async () => {
+  let gespeichert = null;
+  try { gespeichert = JSON.parse(localStorage.getItem(SPEICHER)); } catch {}
+  if (gespeichert) {
+    try {
+      key = await crypto.subtle.importKey('raw', unb64(gespeichert.raw), 'AES-GCM', false, ['decrypt']);
+      salt = gespeichert.salt;
+    } catch { abmelden(); return; }
+    let env;
+    try { env = await holen(); } catch (e) {
+      // Kein Netz: angemeldet bleiben und es gleich wieder versuchen.
+      $('stand').textContent = 'Daten nicht erreichbar, neuer Versuch in einer Minute';
+      $('ansicht').hidden = false;
+      timer = setInterval(aktualisieren, 60000);
+      return;
+    }
+    if (env.salt !== salt) { abmelden('Das Passwort wurde geändert. Bitte neu anmelden.'); return; }
+    try { zeigen(await entschluesseln(env, key)); } catch { abmelden(); return; }
+    timer = setInterval(aktualisieren, 60000);
+    return;
+  }
+  $('login').hidden = false;
+  $('pw').focus();
+})();
+</script>
+</body>
+</html>

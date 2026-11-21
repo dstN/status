@@ -1,0 +1,95 @@
+name: Status
+
+# Alle fünf Minuten: jede Seite aus domains.txt in netcup-deploy abfragen und die verschlüsselte data.json auf Pages
+# legen. Der Verlauf liegt nur dort, also gibt es keine Commits. Dieses Repository ist öffentlich, seine Logs auch:
+# pruefen.mjs gibt keinen Host aus. Gemailt wird hier nichts; das macht uptime.yml in netcup-deploy.
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+    - cron: '41 3 * * 1' # wach halten, siehe unten
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: status
+  cancel-in-progress: false
+
+jobs:
+  pruefen:
+    if: github.event.schedule != '41 3 * * 1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Secrets da?
+        id: secrets
+        env:
+          DOMAINS_KEY: ${{ secrets.DOMAINS_KEY }}
+          STATUS_PASSWORD: ${{ secrets.STATUS_PASSWORD }}
+        run: |
+          if [ -z "$DOMAINS_KEY" ] || [ -z "$STATUS_PASSWORD" ]; then
+            echo "::warning::DOMAINS_KEY oder STATUS_PASSWORD fehlt, siehe README. Nichts geprüft."
+            echo "da=nein" >> "$GITHUB_OUTPUT"
+          else
+            echo "da=ja" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.secrets.outputs.da == 'ja'
+        with:
+          persist-credentials: false
+
+      - name: domains.txt aus netcup-deploy
+        if: steps.secrets.outputs.da == 'ja'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: dstN/netcup-deploy
+          ssh-key: ${{ secrets.DOMAINS_KEY }}
+          sparse-checkout: domains.txt
+          sparse-checkout-cone-mode: false
+          path: liste
+          persist-credentials: false
+
+      - id: pages
+        if: steps.secrets.outputs.da == 'ja'
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Abfragen und verschlüsseln
+        if: steps.secrets.outputs.da == 'ja'
+        env:
+          STATUS_PASSWORD: ${{ secrets.STATUS_PASSWORD }}
+          PREV_URL: ${{ steps.pages.outputs.base_url }}/data.json
+        run: |
+          node scripts/pruefen.mjs liste/domains.txt _site
+          cp site/index.html _site/
+          rm -rf liste
+
+      - if: steps.secrets.outputs.da == 'ja'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
+
+      - id: deploy
+        if: steps.secrets.outputs.da == 'ja'
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+
+  # GitHub schaltet geplante Workflows eines öffentlichen Repositories nach 60 Tagen ohne Aktivität ab. Hier gibt es
+  # keine Commits, also schaltet er sich einmal pro Woche selbst wieder ein.
+  wach:
+    if: github.event.schedule == '41 3 * * 1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/$GITHUB_REPOSITORY/actions/workflows/status.yml/enable"
