@@ -117,3 +117,8 @@ await writeFile(`${ausgabe}/data.json`, JSON.stringify({ v: 1, iter: ITER, salt:
 
 const down = ergebnisse.filter((r) => unten(r.code)).length;
 console.log(`${hosts.length} Seiten geprüft, ${hosts.length - down} erreichbar, ${down} nicht.`);
+
+// Neu ausgefallen heißt: in diesem Lauf zum ersten Mal unten. Nur dann schlägt der Workflow fehl und GitHub mailt,
+// einmal je Ausfall statt alle fünf Minuten.
+const neu = Object.values(sites).filter((s) => s.downSince === jetzt).length;
+if (process.env.GITHUB_OUTPUT) await writeFile(process.env.GITHUB_OUTPUT, `neu=${neu}\n`, { flag: 'a' });

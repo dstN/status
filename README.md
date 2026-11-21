@@ -18,7 +18,7 @@ Es gibt keine Commits. Jeder Lauf holt die laufende `data.json` von Pages, entsc
 
 GitHub schaltet geplante Workflows eines öffentlichen Repositories nach 60 Tagen ohne Aktivität ab. Der Job `wach` schaltet ihn deshalb jeden Montag selbst wieder ein.
 
-Gemailt wird von hier aus nichts, sonst käme bei einem Ausfall alle fünf Minuten eine Mail. Die Mail mit dem Namen der Seite schickt weiter `uptime.yml` in netcup-deploy.
+Fällt eine Seite neu aus, schlägt der Lauf fehl und GitHub schickt die Mail: einmal je Ausfall, nicht alle fünf Minuten. Welche Seite es ist, steht nur auf der Statusseite, weil das Log öffentlich ist. Kommt sie wieder, gibt es keine Mail.
 
 ## Einmal einrichten
 

@@ -2,7 +2,7 @@ name: Status
 
 # Alle fünf Minuten: jede Seite aus domains.txt in netcup-deploy abfragen und die verschlüsselte data.json auf Pages
 # legen. Der Verlauf liegt nur dort, also gibt es keine Commits. Dieses Repository ist öffentlich, seine Logs auch:
-# pruefen.mjs gibt keinen Host aus. Gemailt wird hier nichts; das macht uptime.yml in netcup-deploy.
+# pruefen.mjs gibt keinen Host aus. Fällt eine Seite neu aus, schlägt der Lauf fehl und GitHub mailt, ohne Namen.
 on:
   schedule:
     - cron: '*/5 * * * *'
@@ -63,6 +63,7 @@ jobs:
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
       - name: Abfragen und verschlüsseln
+        id: pruefen
         if: steps.secrets.outputs.da == 'ja'
         env:
           STATUS_PASSWORD: ${{ secrets.STATUS_PASSWORD }}
@@ -80,6 +81,14 @@ jobs:
       - id: deploy
         if: steps.secrets.outputs.da == 'ja'
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+
+      - name: Neu ausgefallen?
+        if: steps.pruefen.outputs.neu != '' && steps.pruefen.outputs.neu != '0'
+        env:
+          NEU: ${{ steps.pruefen.outputs.neu }}
+        run: |
+          echo "::error::$NEU Seite(n) neu ausgefallen, welche zeigt die Statusseite."
+          exit 1
 
   # GitHub schaltet geplante Workflows eines öffentlichen Repositories nach 60 Tagen ohne Aktivität ab. Hier gibt es
   # keine Commits, also schaltet er sich einmal pro Woche selbst wieder ein.
