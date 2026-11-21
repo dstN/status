@@ -12,6 +12,10 @@ Wer die `data.json` hat, kann Passwörter offline durchprobieren. Darum ein lang
 
 Dieses Repository ist öffentlich, damit die Actions-Minuten nichts kosten; alle fünf Minuten wären in einem privaten Repository weit über dem Freikontingent. Öffentlich sind damit auch die Logs: `scripts/pruefen.mjs` gibt keinen Host aus, nur die Zahl der erreichbaren Seiten. Im Repository selbst steht keine Domain.
 
+## Zertifikate
+
+Bei jedem Lauf liest der Workflow das Zertifikat jeder Seite von außen und merkt sich das Ablaufdatum; die Seite zeigt die verbleibenden Tage. Läuft eines in weniger als 21 Tagen ab, schlägt der Lauf fehl und GitHub mailt, danach jede Woche wieder, bis es erneuert ist. Das fängt die Wildcards, die Plesk nicht selbst erneuert (README von netcup-deploy, „Zertifikate“), und jede normale Erneuerung, die schiefging. Ein abgelaufenes Zertifikat ist für die Abfrage keine Antwort und zählt sofort als Ausfall.
+
 ## Verlauf
 
 Es gibt keine Commits. Jeder Lauf holt die laufende `data.json` von Pages, entschlüsselt sie, hängt das neue Ergebnis an und legt sie wieder ab. Gehalten werden die letzten 288 Abfragen je Seite (24 Stunden) und je Tag die Zahl der erfolgreichen, 90 Tage lang. Eine Seite, die aus `domains.txt` verschwindet, verschwindet mit ihrem Verlauf.

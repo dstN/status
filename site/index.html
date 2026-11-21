@@ -43,7 +43,8 @@
   .balken { display: flex; gap: 2px; height: 22px; margin: 8px 0 4px; }
   .balken span { flex: 1; border-radius: 2px; background: var(--empty); }
   .balken .ok { background: var(--ok); } .balken .down { background: var(--down); } .balken .teil { background: var(--warn); }
-  .fuss { display: flex; justify-content: space-between; }
+  .fuss { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; }
+  .fuss .warn { color: var(--warn); font-weight: 600; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -67,7 +68,7 @@
     <p class="muted"><span id="stand"></span> · <button class="leise" id="abmelden" type="button">Abmelden</button></p>
     <div class="gesamt" id="gesamt" role="status"></div>
     <ul id="liste"></ul>
-    <p class="muted">Balken: die letzten 24 Stunden in halben Stunden. Grün erreichbar, Rot ausgefallen, Gelb teilweise. 401 und 403 zählen als erreichbar.</p>
+    <p class="muted">Balken: die letzten 24 Stunden in halben Stunden. Grün erreichbar, Rot ausgefallen, Gelb teilweise. 401 und 403 zählen als erreichbar. Zertifikate unter 21 Tagen sind gelb.</p>
   </section>
 </main>
 <script>
@@ -111,19 +112,22 @@ function zeigen(data) {
   const reihen = hosts.map((host) => {
     const s = data.sites[host];
     const [t, code, ms] = s.recent[s.recent.length - 1];
-    return { host, s, code, ms, down: unten(code) };
-  }).sort((a, b) => (b.down - a.down) || a.host.localeCompare(b.host));
+    const tage = s.cert ? Math.floor((s.cert - jetzt) / 86400) : null;
+    return { host, s, code, ms, down: unten(code), certTage: tage, certWarn: tage !== null && tage < 21 };
+  }).sort((a, b) => (b.down - a.down) || (b.certWarn - a.certWarn) || a.host.localeCompare(b.host));
 
   const anzahlDown = reihen.filter((r) => r.down).length;
+  const anzahlZert = reihen.filter((r) => r.certWarn).length;
   const alt = jetzt - data.updated > 20 * 60;
   const g = $('gesamt');
-  g.className = 'gesamt ' + (alt ? 'alt' : anzahlDown ? 'down' : 'ok');
+  g.className = 'gesamt ' + (alt || (!anzahlDown && anzahlZert) ? 'alt' : anzahlDown ? 'down' : 'ok');
   g.textContent = alt ? 'Die letzte Prüfung ist ' + vor(data.updated).replace('vor ', '') + ' her, die Prüfung hängt.'
     : anzahlDown ? anzahlDown + ' von ' + hosts.length + ' Seiten ' + (anzahlDown === 1 ? 'ist' : 'sind') + ' nicht erreichbar.'
     : 'Alle ' + hosts.length + ' Seiten sind erreichbar.';
+  if (!alt && anzahlZert) g.textContent += ' ' + anzahlZert + (anzahlZert === 1 ? ' Zertifikat läuft' : ' Zertifikate laufen') + ' in unter 21 Tagen ab.';
   $('stand').textContent = 'Geprüft ' + vor(data.updated);
 
-  $('liste').replaceChildren(...reihen.map(({ host, s, code, ms, down }) => {
+  $('liste').replaceChildren(...reihen.map(({ host, s, code, ms, down, certTage, certWarn }) => {
     const li = document.createElement('li');
     // 48 Abschnitte à 30 Minuten, der letzte endet jetzt.
     const segs = [];
@@ -145,7 +149,8 @@ function zeigen(data) {
       '<a class="host" href="https://' + host + '/" rel="noreferrer">' + host + '</a>' +
       '<span class="rechts muted">' + (down ? (code ? code : 'keine Antwort') + seit : code + ' · ' + ms + ' ms') + '</span></div>' +
       '<div class="balken" role="img" aria-label="Verfügbarkeit der letzten 24 Stunden: ' + prozent(ok24, n24) + '">' + segs.join('') + '</div>' +
-      '<div class="fuss muted"><span>24 Std.: ' + prozent(ok24, n24) + '</span><span>' + tage + (tage === 1 ? ' Tag: ' : ' Tage: ') + prozent(okT, nT) + '</span></div>';
+      '<div class="fuss muted"><span>24 Std.: ' + prozent(ok24, n24) + '</span>' +
+      '<span' + (certWarn ? ' class="warn"' : '') + '>Zertifikat: ' + (certTage === null ? 'nicht lesbar' : certTage < 0 ? 'abgelaufen' : 'noch ' + certTage + (certTage === 1 ? ' Tag' : ' Tage')) + '</span><span>' + tage + (tage === 1 ? ' Tag: ' : ' Tage: ') + prozent(okT, nT) + '</span></div>';
     return li;
   }));
   $('login').hidden = true;

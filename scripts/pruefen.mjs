@@ -3,8 +3,10 @@
 // Die Logs eines öffentlichen Repositories kann jeder lesen: Hier wird kein Host ausgegeben, nur Zahlen.
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { webcrypto as crypto } from 'node:crypto';
+import tls from 'node:tls';
 
 const ITER = 600000; // PBKDF2-SHA256, Empfehlung von OWASP
+const WARNTAGE = 21; // Zertifikate, die früher ablaufen, mahnt der Lauf an, einmal pro Woche
 const RECENT = 288; // letzte 24 Stunden bei einem Lauf alle 5 Minuten
 const TAGE = 90;
 
@@ -64,17 +66,33 @@ async function frage(host) {
   }
 }
 
+// Das Ablaufdatum des Zertifikats, von außen gelesen; null, wenn keines zu lesen war. Geprüft wird es hier nicht,
+// das macht frage(): Ein abgelaufenes oder falsches Zertifikat ist dort keine Antwort, also ein Ausfall.
+function zertifikat(host) {
+  return new Promise((fertig) => {
+    const sock = tls.connect({ host, port: 443, servername: host, rejectUnauthorized: false, timeout: 20000 });
+    const ende = (wert) => { sock.destroy(); fertig(wert); };
+    sock.once('secureConnect', () => {
+      const bis = Date.parse(sock.getPeerCertificate()?.valid_to ?? '');
+      ende(Number.isNaN(bis) ? null : Math.floor(bis / 1000));
+    });
+    sock.once('timeout', () => ende(null));
+    sock.once('error', () => ende(null));
+  });
+}
+
 // 000 und 5xx sind ein Ausfall; 401 und 403 nicht, weil Vorschauen hinter einem Passwort liegen.
 const unten = (code) => code === 0 || code >= 500;
 
 async function pruefe(host) {
+  const zert = zertifikat(host);
   let r = await frage(host);
   if (unten(r.code)) {
     // Der zweite Versuch deckt eine 500 oder ein Timeout ab, während Passenger eine schlafende App startet.
     await new Promise((ok) => setTimeout(ok, 20000));
     r = await frage(host);
   }
-  return r;
+  return { ...r, zert: await zert };
 }
 
 const hosts = (await readFile(liste, 'utf8'))
@@ -95,7 +113,7 @@ const grenze = new Date((jetzt - TAGE * 86400) * 1000).toISOString().slice(0, 10
 const ergebnisse = await Promise.all(hosts.map(pruefe));
 const sites = {};
 hosts.forEach((host, i) => {
-  const { code, ms } = ergebnisse[i];
+  const { code, ms, zert } = ergebnisse[i];
   const ok = !unten(code);
   const s = state.sites[host] ?? { recent: [], days: {} };
   s.recent.push([jetzt, code, ms]);
@@ -105,6 +123,13 @@ hosts.forEach((host, i) => {
   for (const t of Object.keys(s.days)) if (t < grenze) delete s.days[t];
   if (!ok && (s.downSince == null)) s.downSince = jetzt;
   if (ok) delete s.downSince;
+  // Ein Lauf ohne lesbares Zertifikat behält das letzte bekannte Datum.
+  if (zert) s.cert = zert;
+  if (s.cert && s.cert - jetzt < WARNTAGE * 86400) {
+    if (!s.certAlert || jetzt - s.certAlert >= 7 * 86400) s.certAlert = jetzt;
+  } else {
+    delete s.certAlert;
+  }
   sites[host] = s; // Hosts, die aus der Liste verschwunden sind, fallen so heraus.
 });
 
@@ -120,5 +145,8 @@ console.log(`${hosts.length} Seiten geprüft, ${hosts.length - down} erreichbar,
 
 // Neu ausgefallen heißt: in diesem Lauf zum ersten Mal unten. Nur dann schlägt der Workflow fehl und GitHub mailt,
 // einmal je Ausfall statt alle fünf Minuten.
+// Genauso bei Zertifikaten unter WARNTAGE: einmal, dann jede Woche wieder, bis es erneuert ist.
 const neu = Object.values(sites).filter((s) => s.downSince === jetzt).length;
-if (process.env.GITHUB_OUTPUT) await writeFile(process.env.GITHUB_OUTPUT, `neu=${neu}\n`, { flag: 'a' });
+const zert = Object.values(sites).filter((s) => s.certAlert === jetzt).length;
+console.log(`${Object.values(sites).filter((s) => !s.cert).length} Zertifikate nicht lesbar.`);
+if (process.env.GITHUB_OUTPUT) await writeFile(process.env.GITHUB_OUTPUT, `neu=${neu}\nzert=${zert}\n`, { flag: 'a' });
