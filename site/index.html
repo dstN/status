@@ -37,13 +37,23 @@
   .kopf { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
   .punkt { width: 10px; height: 10px; border-radius: 50%; flex: none; align-self: center; }
   .punkt.ok { background: var(--ok); } .punkt.down { background: var(--down); }
-  .host { font-weight: 600; color: inherit; text-decoration: none; word-break: break-all; }
-  .host:hover { text-decoration: underline; }
+  .host { word-break: break-all; }
   .rechts { margin-left: auto; white-space: nowrap; }
   .balken { display: flex; gap: 2px; height: 22px; margin: 8px 0 4px; }
   .balken span { flex: 1; border-radius: 2px; background: var(--empty); }
   .balken .ok { background: var(--ok); } .balken .down { background: var(--down); } .balken .teil { background: var(--warn); }
   .fuss { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; }
+  .host { font: inherit; font-weight: 600; background: none; border: 0; padding: 0; color: inherit; cursor: pointer; text-align: left; }
+  .host::after { content: ' ▾'; color: var(--muted); font-weight: 400; }
+  .host[aria-expanded="true"]::after { content: ' ▴'; }
+  .raus { color: var(--muted); text-decoration: none; padding: 0 4px; }
+  .raus:hover { color: var(--accent); }
+  .mehr { margin-top: 12px; padding-top: 4px; border-top: 1px dashed var(--line); }
+  .zeile { margin-top: 10px; }
+  .zeile .balken { margin: 4px 0 0; }
+  .balken.dicht { gap: 1px; }
+  .balken.dicht span { border-radius: 1px; }
+  .klein { font-size: .8rem; margin: 10px 0 0; }
   .fuss .warn { color: var(--warn); font-weight: 600; }
   [hidden] { display: none !important; }
 </style>
@@ -68,7 +78,7 @@
     <p class="muted"><span id="stand"></span> · <button class="leise" id="abmelden" type="button">Abmelden</button></p>
     <div class="gesamt" id="gesamt" role="status"></div>
     <ul id="liste"></ul>
-    <p class="muted">Balken: die letzten 24 Stunden in halben Stunden. Grün erreichbar, Rot ausgefallen, Gelb teilweise. 401 und 403 zählen als erreichbar. Zertifikate unter 21 Tagen sind gelb.</p>
+    <p class="muted">Balken: die letzten 24 Stunden in halben Stunden. Grün erreichbar, Rot ausgefallen, Gelb teilweise. 401 und 403 zählen als erreichbar. Zertifikate unter 21 Tagen sind gelb. Ein Klick auf eine Seite zeigt 30 Tage, 90 Tage und 12 Monate.</p>
   </section>
 </main>
 <script>
@@ -106,6 +116,41 @@ function vor(sek) {
 
 function prozent(a, b) { return b ? (Math.floor(a / b * 1000) / 10).toLocaleString('de-DE') + ' %' : '–'; }
 
+const offen = new Set();
+
+// Ein Abschnitt aus [ok, gesamt]: grün, wenn alle Abfragen durchkamen, rot, wenn keine, sonst gelb.
+function abschnitt([ok, n], titel) {
+  const cls = !n ? '' : ok === n ? 'ok' : ok === 0 ? 'down' : 'teil';
+  return '<span class="' + cls + '" title="' + titel + ': ' + (n ? prozent(ok, n) : 'keine Daten') + '"></span>';
+}
+
+function verlauf(days, jetzt) {
+  const tagKey = (i) => new Date((jetzt - i * 86400) * 1000).toISOString().slice(0, 10);
+  const datum = (k) => k.slice(8, 10) + '.' + k.slice(5, 7) + '.';
+  const summe = (keys) => keys.reduce(([a, b], k) => { const d = days[k]; return d ? [a + d[0], b + d[1]] : [a, b]; }, [0, 0]);
+  const reihe = (titel, keys, segs, dicht) => {
+    const [ok, n] = summe(keys);
+    return '<div class="zeile"><div class="fuss muted"><span>' + titel + '</span><span>' + prozent(ok, n) + '</span></div>' +
+      '<div class="balken' + (dicht ? ' dicht' : '') + '" role="img" aria-label="Verfügbarkeit ' + titel + ': ' + prozent(ok, n) + '">' + segs.join('') + '</div></div>';
+  };
+  const letzte = (n) => Array.from({ length: n }, (_, i) => tagKey(n - 1 - i));
+  const t30 = letzte(30), t90 = letzte(90), t365 = letzte(365);
+  const tagesSegs = (keys) => keys.map((k) => abschnitt(days[k] || [0, 0], datum(k)));
+  // 12 Monate: der laufende zuletzt.
+  const monate = [];
+  const heute = new Date(jetzt * 1000);
+  for (let i = 11; i >= 0; i--) {
+    const m = new Date(Date.UTC(heute.getUTCFullYear(), heute.getUTCMonth() - i, 1));
+    monate.push(m.toISOString().slice(0, 7));
+  }
+  const monSegs = monate.map((m) => abschnitt(summe(Object.keys(days).filter((k) => k.startsWith(m))),
+    new Date(m + '-01T00:00:00Z').toLocaleDateString('de-DE', { month: 'short', year: 'numeric', timeZone: 'UTC' })));
+  const alle = Object.keys(days).sort();
+  const ab = alle.length ? '<p class="muted klein">Daten seit ' + datum(alle[0]) + alle[0].slice(0, 4) + '</p>' : '';
+  return reihe('30 Tage', t30, tagesSegs(t30)) + reihe('90 Tage', t90, tagesSegs(t90), true) +
+    reihe('12 Monate', t365.filter((k) => k.slice(0, 7) >= monate[0]), monSegs) + ab;
+}
+
 function zeigen(data) {
   const jetzt = Date.now() / 1000;
   const hosts = Object.keys(data.sites);
@@ -140,17 +185,17 @@ function zeigen(data) {
     }
     const ok24 = s.recent.filter(([t, c]) => t > jetzt - 86400 && !unten(c)).length;
     const n24 = s.recent.filter(([t]) => t > jetzt - 86400).length;
-    let okT = 0, nT = 0;
-    for (const [a, b] of Object.values(s.days)) { okT += a; nT += b; }
-    const tage = Object.keys(s.days).length;
     const seit = s.downSince ? ' seit ' + vor(s.downSince).replace('vor ', '') : '';
+    const auf = offen.has(host);
     li.innerHTML =
       '<div class="kopf"><span class="punkt ' + (down ? 'down' : 'ok') + '" aria-hidden="true"></span>' +
-      '<a class="host" href="https://' + host + '/" rel="noreferrer">' + host + '</a>' +
+      '<button class="host" type="button" aria-expanded="' + auf + '" aria-controls="d-' + host + '" data-host="' + host + '">' + host + '</button>' +
+      '<a class="raus" href="https://' + host + '/" rel="noreferrer" aria-label="' + host + ' öffnen">↗</a>' +
       '<span class="rechts muted">' + (down ? (code ? code : 'keine Antwort') + seit : code + ' · ' + ms + ' ms') + '</span></div>' +
       '<div class="balken" role="img" aria-label="Verfügbarkeit der letzten 24 Stunden: ' + prozent(ok24, n24) + '">' + segs.join('') + '</div>' +
       '<div class="fuss muted"><span>24 Std.: ' + prozent(ok24, n24) + '</span>' +
-      '<span' + (certWarn ? ' class="warn"' : '') + '>Zertifikat: ' + (certTage === null ? 'nicht lesbar' : certTage < 0 ? 'abgelaufen' : 'noch ' + certTage + (certTage === 1 ? ' Tag' : ' Tage')) + '</span><span>' + tage + (tage === 1 ? ' Tag: ' : ' Tage: ') + prozent(okT, nT) + '</span></div>';
+      '<span' + (certWarn ? ' class="warn"' : '') + '>Zertifikat: ' + (certTage === null ? 'nicht lesbar' : certTage < 0 ? 'abgelaufen' : 'noch ' + certTage + (certTage === 1 ? ' Tag' : ' Tage')) + '</span></div>' +
+      '<div class="mehr" id="d-' + host + '"' + (auf ? '' : ' hidden') + '>' + verlauf(s.days, jetzt) + '</div>';
     return li;
   }));
   $('login').hidden = true;
@@ -176,6 +221,15 @@ function abmelden(meldung) {
 }
 
 $('abmelden').addEventListener('click', () => abmelden());
+
+$('liste').addEventListener('click', (ev) => {
+  const knopf = ev.target.closest('button.host');
+  if (!knopf) return;
+  const host = knopf.dataset.host, auf = !offen.has(host);
+  auf ? offen.add(host) : offen.delete(host);
+  knopf.setAttribute('aria-expanded', String(auf));
+  document.getElementById('d-' + host).hidden = !auf;
+});
 
 $('login').addEventListener('submit', async (ev) => {
   ev.preventDefault();

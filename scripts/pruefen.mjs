@@ -8,7 +8,7 @@ import tls from 'node:tls';
 const ITER = 600000; // PBKDF2-SHA256, Empfehlung von OWASP
 const WARNTAGE = 21; // Zertifikate, die früher ablaufen, mahnt der Lauf an, einmal pro Woche
 const RECENT = 288; // letzte 24 Stunden bei einem Lauf alle 5 Minuten
-const TAGE = 90;
+const TAGE = 366; // Tagesbilanz je Seite, für die Balken über 30 Tage, 90 Tage und 12 Monate
 
 const [liste, ausgabe] = process.argv.slice(2);
 const passwort = process.env.STATUS_PASSWORD;

@@ -18,7 +18,7 @@ Bei jedem Lauf liest der Workflow das Zertifikat jeder Seite von außen und merk
 
 ## Verlauf
 
-Es gibt keine Commits. Jeder Lauf holt die laufende `data.json` von Pages, entschlüsselt sie, hängt das neue Ergebnis an und legt sie wieder ab. Gehalten werden die letzten 288 Abfragen je Seite (24 Stunden) und je Tag die Zahl der erfolgreichen, 90 Tage lang. Eine Seite, die aus `domains.txt` verschwindet, verschwindet mit ihrem Verlauf.
+Es gibt keine Commits. Jeder Lauf holt die laufende `data.json` von Pages, entschlüsselt sie, hängt das neue Ergebnis an und legt sie wieder ab. Gehalten werden die letzten 288 Abfragen je Seite (24 Stunden) und je Tag die Zahl der erfolgreichen, ein Jahr lang. Ein Klick auf eine Seite klappt die Balken für 30 Tage, 90 Tage und 12 Monate auf. Eine Seite, die aus `domains.txt` verschwindet, verschwindet mit ihrem Verlauf.
 
 GitHub schaltet geplante Workflows eines öffentlichen Repositories nach 60 Tagen ohne Aktivität ab. Der Job `wach` schaltet ihn deshalb jeden Montag selbst wieder ein.
 
