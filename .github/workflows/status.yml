@@ -28,7 +28,7 @@ jobs:
       id-token: write
     environment:
       name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+      url: ${{ steps.deploy.outputs.page_url || steps.deploy2.outputs.page_url }}
     steps:
       - name: Secrets da?
         id: secrets
@@ -79,9 +79,25 @@ jobs:
         with:
           path: _site
 
+      # deploy-pages findet das eben hochgeladene Artefakt ab und zu nicht („No artifacts named github-pages“), ein
+      # Timing-Problem bei GitHub. Darum ein zweiter Versuch nach einer Pause. Scheitert auch der, fehlt auf der Seite
+      # nur dieser eine Lauf, der nächste holt es nach; das ist eine Warnung wert, aber keine Mail. Bleibt das
+      # Veröffentlichen länger aus, zeigt die Seite nach 20 Minuten selbst gelb.
       - id: deploy
         if: steps.secrets.outputs.da == 'ja'
+        continue-on-error: true
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+
+      - if: steps.deploy.outcome == 'failure'
+        run: sleep 20
+
+      - id: deploy2
+        if: steps.deploy.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+
+      - if: steps.deploy2.outcome == 'failure'
+        run: echo "::warning::Veröffentlichen ist zweimal gescheitert; der nächste Lauf holt es nach."
 
       - name: Neu ausgefallen oder Zertifikat fällig?
         if: >-
